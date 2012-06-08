@@ -1,0 +1,11 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<processes>
+  <process type="interval" filename="notepad" arguments="">
+    <timer days="0" hours="0" minutes="0" seconds="5" milliseconds="0"></timer>
+    <timeout days="0" hours="0" minutes="0" seconds="9" milliseconds="0"></timeout>
+  </process>
+  <process type="interval" filename="C:\Windows\System32\mspaint.exe" arguments="">
+    <timer days="0" hours="0" minutes="0" seconds="5" milliseconds="0"></timer>
+    <timeout days="0" hours="0" minutes="0" seconds="9" milliseconds="0"></timeout>
+  </process>
+</processes>
