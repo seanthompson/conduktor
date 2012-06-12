@@ -11,6 +11,5 @@ namespace Conduktor
         public string Arguments { get; set; }
         public TimeSpan TimerDuration { get; set; }
         public TimeSpan KillAfter { get; set; }
-
     }
 }

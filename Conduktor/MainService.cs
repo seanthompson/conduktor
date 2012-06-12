@@ -10,12 +10,14 @@ using System.Xml.Linq;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using NLog;
 
 namespace Conduktor
 {
     public partial class MainService : ServiceBase
     {
-        private List<Task> currentTasks = new List<Task>();
+        private static List<Task> currentTasks = new List<Task>();
+        private static Logger logger = LogManager.GetCurrentClassLogger();
 
         public MainService()
         {
@@ -30,70 +32,129 @@ namespace Conduktor
         {
             LoadProcesses();
 
-            Task.WaitAll(currentTasks.ToArray());
+            if (currentTasks.Count() > 0)
+                Task.WaitAll(currentTasks.ToArray());
         }
 
         private void LoadProcesses()
         {
-
-            XDocument processConfig = GetProcessesXml();
-
-            IEnumerable<XElement> intervalProcesses = GetIntervalProcesses(processConfig);
-            
-            foreach (XElement processToStart in intervalProcesses)
+            try
             {
-                IntervalProcessSettings settings = GetIntervalProcessSettings(processToStart);
+                IEnumerable<XElement> intervalProcesses = GetIntervalProcesses();
 
-                bool hasValidSettings = ValidateIntervalProcessSettings(settings);
-
-                if (hasValidSettings)
+                if (intervalProcesses != null)
                 {
-                    currentTasks.Add(Task.Factory.StartNew(() => StartIntervalProcess(settings)));
+                    foreach (XElement processToStart in intervalProcesses)
+                    {
+                        IntervalProcessSettings settings = GetIntervalProcessSettings(processToStart);
+
+                        bool hasValidSettings = ValidateIntervalProcessSettings(settings);
+
+                        if (hasValidSettings)
+                        {
+                            currentTasks.Add(Task.Factory.StartNew(() => StartIntervalProcess(settings)));
+                        }
+                    }
                 }
             }
+            catch (Exception ex)
+            {
+                logger.ErrorException("Error loading processes", ex);
+            }
+        }
 
+        private IEnumerable<XElement> GetIntervalProcesses()
+        {
+            IEnumerable<XElement> intervalProcesses = null;
+            XDocument processConfig = GetProcessesXml();
+
+            try
+            {
+                intervalProcesses =
+                    (from process in processConfig.Descendants("process")
+                     where (string)process.Attribute("type") == "interval"
+                     select process);
+            }
+            catch (Exception ex)
+            {
+                logger.ErrorException("Error getting interval processes.", ex);
+            }
+
+            return intervalProcesses;
         }
 
         private XDocument GetProcessesXml()
         {
-            string processConfigPath = string.Format("{0}\\config\\processes.xml", Directory.GetCurrentDirectory());
-            return XDocument.Load(processConfigPath);
-        }
+            XDocument processesXml = null;
 
-        private IEnumerable<XElement> GetIntervalProcesses(XDocument processConfig)
-        {
-            return (from process in processConfig.Descendants("process")
-                    where (string)process.Attribute("type") == "interval"
-                    select process);
+            try
+            {
+
+                string processConfigPath = string.Format("{0}\\config\\processes.xml", Directory.GetCurrentDirectory());
+                processesXml = XDocument.Load(processConfigPath);
+            }
+            catch (Exception ex)
+            {
+                logger.ErrorException("Error getting processes XML.", ex);
+            }
+
+            return processesXml;
         }
 
         private IntervalProcessSettings GetIntervalProcessSettings(XElement process)
         {
             IntervalProcessSettings settings = new IntervalProcessSettings();
-            XElement timer = process.Element("timer");
-            XElement timeout = process.Element("timeout");
 
-            settings.Filename = (string)process.Attribute("filename");
-            settings.Arguments = (string)process.Attribute("arguments");
-            settings.TimerDuration = CreateTimeSpan(timer);
-            settings.KillAfter = CreateTimeSpan(timeout);
+            try
+            {
+                XElement timer = process.Element("timer");
+                XElement timeout = process.Element("timeout");
+
+                settings.Filename = (string)process.Attribute("filename");
+                settings.Arguments = (string)process.Attribute("arguments");
+                settings.TimerDuration = CreateTimeSpan(timer);
+                settings.KillAfter = CreateTimeSpan(timeout);
+            }
+            catch (Exception ex)
+            {
+                logger.ErrorException("Error getting interval process settings.", ex);
+            }
 
             return settings;
         }
 
         private bool ValidateIntervalProcessSettings(IntervalProcessSettings settings)
         {
-            return true;
+            bool hasValidSettings = true;
+
+            try
+            {
+                if (!File.Exists(settings.Filename))
+                {
+                    hasValidSettings = false;
+                }
+                
+            }
+            catch (Exception ex)
+            {
+                logger.ErrorException("Error validating interval process settings.", ex);
+                hasValidSettings = false;
+            }
+
+            return hasValidSettings;
         }
 
         private TimeSpan CreateTimeSpan(XElement element)
         {
-            return CreateTimeSpan((int)element.Attribute("days"), (int)element.Attribute("hours"), (int)element.Attribute("minutes"), (int)element.Attribute("seconds"), (int)element.Attribute("milliseconds"));
-        }
+            int days, hours, minutes, seconds, milliseconds = 0;
 
-        private TimeSpan CreateTimeSpan(int days, int hours, int minutes, int seconds, int milliseconds)
-        {
-            return new TimeSpan(days, hours, minutes, seconds);
+            days = element.Attribute("days") != null ? (int)element.Attribute("days") : 0;
+            hours = element.Attribute("hours") != null ? (int)element.Attribute("hours") : 0;
+            minutes = element.Attribute("minutes") != null ? (int)element.Attribute("minutes") : 0;
+            seconds = element.Attribute("seconds") != null ? (int)element.Attribute("seconds") : 0;
+            milliseconds = element.Attribute("milliseconds") != null ? (int)element.Attribute("milliseconds") : 0;
+
+            return new TimeSpan(days, hours, minutes, seconds, milliseconds);
         }
 
         private void StartIntervalProcess(IntervalProcessSettings settings)
@@ -112,18 +173,32 @@ namespace Conduktor
 
         private void RunProcess(string filename, string arguments, TimeSpan killAfter)
         {
-            Process processToRun = Process.Start(filename, arguments);
+            Process processToRun = null;
 
-            bool alreadyClosed = processToRun.WaitForExit((int)(killAfter).TotalMilliseconds);
-
-            if (!alreadyClosed)
+            try
             {
-                bool closedSuccessfully = processToRun.CloseMainWindow();
+                processToRun = Process.Start(filename, arguments);
 
-                if (!closedSuccessfully)
+                bool alreadyClosed = processToRun.WaitForExit((int)(killAfter).TotalMilliseconds);
+
+                if (!alreadyClosed)
                 {
-                    processToRun.Kill();
+                    bool closedSuccessfully = processToRun.CloseMainWindow();
+
+                    if (!closedSuccessfully)
+                    {
+                        processToRun.Kill();
+                    }
                 }
+
+            }
+            catch (Exception ex)
+            {
+                logger.ErrorException("Error running process.", ex);
+            }
+            finally
+            {
+                processToRun.Dispose();
             }
         }
 
